@@ -2,7 +2,9 @@
 name = "sccp"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "SCCP (Signaling Connection Control Part) codec per ITU-T Q.711-Q.716"
+license = "MIT"
+repository = "https://github.com/killdashnine/sccp"
 
 [dependencies]
+thiserror = "2"

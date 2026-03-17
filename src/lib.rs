@@ -1,14 +1,43 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
-}
+//! SCCP (Signaling Connection Control Part) codec per ITU-T Q.711-Q.716.
+//!
+//! Provides types for encoding and decoding SCCP messages including:
+//! - SCCP addresses with Global Title (GT) variants
+//! - TBCD encoding for GT digits
+//! - Unitdata (UDT) and Unitdata Service (UDTS) messages
+//! - Subsystem Numbers (SSN)
+//!
+//! This is a pure codec crate with no transport dependencies.
+//!
+//! # Example
+//!
+//! ```
+//! use sccp::{SccpAddress, GlobalTitle, SubsystemNumber, UnitData};
+//!
+//! // Create an address with GT0100 (E.164 number)
+//! let gt = GlobalTitle::Gt0100 {
+//!     translation_type: 0,
+//!     numbering_plan: 1,  // E.164
+//!     encoding_scheme: 1, // BCD odd
+//!     nature_of_address: 4,
+//!     digits: "31612345678".to_string(),
+//! };
+//! let called = SccpAddress::with_gt(gt, Some(SubsystemNumber::Hlr));
+//! let calling = SccpAddress::with_ssn(SubsystemNumber::Msc, None);
+//!
+//! let udt = UnitData::new(called, calling, vec![0x62, 0x40]);
+//! let encoded = udt.encode().unwrap();
+//! let decoded = UnitData::decode(&encoded).unwrap();
+//! ```
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod address;
+pub mod bcd;
+pub mod error;
+pub mod global_title;
+pub mod message;
+pub mod types;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use address::SccpAddress;
+pub use error::SccpError;
+pub use global_title::{GtIndicator, GlobalTitle};
+pub use message::{SccpMessage, UnitData, UnitDataService};
+pub use types::{MessageType, ReturnCause, SubsystemNumber};
