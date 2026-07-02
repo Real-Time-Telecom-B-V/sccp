@@ -1,3 +1,6 @@
+//! Global Title (GT) types: the [`GtIndicator`] field and the five
+//! [`GlobalTitle`] formats, with TBCD-coded digits.
+
 use std::fmt;
 
 use crate::bcd;
@@ -20,6 +23,7 @@ pub enum GtIndicator {
 }
 
 impl GtIndicator {
+    /// Map the 4-bit GT-indicator field to a [`GtIndicator`], or error on a value above 4.
     pub fn from_u8(value: u8) -> Result<Self, SccpError> {
         match value {
             0 => Ok(Self::NoGt),
@@ -39,33 +43,48 @@ pub enum GlobalTitle {
     NoTitle,
     /// GT format 0001: Nature of Address Indicator + digits.
     Gt0001 {
+        /// Nature of Address Indicator (7 bits).
         nature_of_address: u8,
+        /// Odd/even indicator for the digit count.
         odd_even: bool,
+        /// Address digits (decoded from TBCD).
         digits: String,
     },
     /// GT format 0010: Translation Type + digits.
     Gt0010 {
+        /// Translation type.
         translation_type: u8,
+        /// Address digits (decoded from TBCD).
         digits: String,
     },
     /// GT format 0011: Translation Type + Numbering Plan + Encoding Scheme + digits.
     Gt0011 {
+        /// Translation type.
         translation_type: u8,
+        /// Numbering plan (4 bits).
         numbering_plan: u8,
+        /// Encoding scheme (4 bits).
         encoding_scheme: u8,
+        /// Address digits (decoded from TBCD).
         digits: String,
     },
     /// GT format 0100: Translation Type + Numbering Plan + Encoding Scheme + Nature of Address + digits.
     Gt0100 {
+        /// Translation type.
         translation_type: u8,
+        /// Numbering plan (4 bits).
         numbering_plan: u8,
+        /// Encoding scheme (4 bits).
         encoding_scheme: u8,
+        /// Nature of Address Indicator (7 bits).
         nature_of_address: u8,
+        /// Address digits (decoded from TBCD).
         digits: String,
     },
 }
 
 impl GlobalTitle {
+    /// The [`GtIndicator`] corresponding to this Global Title variant.
     pub fn indicator(&self) -> GtIndicator {
         match self {
             Self::NoTitle => GtIndicator::NoGt,
@@ -76,6 +95,7 @@ impl GlobalTitle {
         }
     }
 
+    /// The decoded address digits, or `None` for [`GlobalTitle::NoTitle`].
     pub fn digits(&self) -> Option<&str> {
         match self {
             Self::NoTitle => None,
@@ -170,8 +190,7 @@ impl GlobalTitle {
                 odd_even,
                 digits,
             } => {
-                let first_byte =
-                    (if *odd_even { 0x80 } else { 0x00 }) | (nature_of_address & 0x7F);
+                let first_byte = (if *odd_even { 0x80 } else { 0x00 }) | (nature_of_address & 0x7F);
                 let mut buf = vec![first_byte];
                 buf.extend_from_slice(&bcd::encode_tbcd(digits)?);
                 Ok(buf)
@@ -263,7 +282,7 @@ mod tests {
             numbering_plan: 1,  // E.164
             encoding_scheme: 1, // BCD odd
             nature_of_address: 4,
-            digits: "31612345678".to_string(),
+            digits: "15551234567".to_string(),
         };
 
         let encoded = gt.encode().unwrap();
@@ -281,7 +300,7 @@ mod tests {
                 assert_eq!(*numbering_plan, 1);
                 assert_eq!(*encoding_scheme, 1);
                 assert_eq!(*nature_of_address, 4);
-                assert_eq!(digits, "31612345678");
+                assert_eq!(digits, "15551234567");
             }
             _ => panic!("Expected Gt0100"),
         }
@@ -315,10 +334,70 @@ mod tests {
             numbering_plan: 1,
             encoding_scheme: 1,
             nature_of_address: 4,
-            digits: "31612345678".to_string(),
+            digits: "15551234567".to_string(),
         };
         let s = format!("{gt}");
-        assert!(s.contains("31612345678"));
+        assert!(s.contains("15551234567"));
         assert!(s.contains("GT0100"));
+    }
+
+    #[test]
+    fn indicator_matches_variant() {
+        assert_eq!(GlobalTitle::NoTitle.indicator(), GtIndicator::NoGt);
+        let gt = GlobalTitle::Gt0011 {
+            translation_type: 0,
+            numbering_plan: 1,
+            encoding_scheme: 1,
+            digits: "5550100".to_string(),
+        };
+        assert_eq!(gt.indicator(), GtIndicator::Gt0011);
+    }
+
+    #[test]
+    fn gt0010_round_trip() {
+        let gt = GlobalTitle::Gt0010 {
+            translation_type: 9,
+            digits: "5550199".to_string(),
+        };
+        let decoded = GlobalTitle::decode(&gt.encode().unwrap(), GtIndicator::Gt0010).unwrap();
+        assert_eq!(decoded, gt);
+    }
+
+    #[test]
+    fn gt0011_round_trip() {
+        let gt = GlobalTitle::Gt0011 {
+            translation_type: 0,
+            numbering_plan: 1,
+            encoding_scheme: 2,
+            digits: "5550142".to_string(),
+        };
+        let decoded = GlobalTitle::decode(&gt.encode().unwrap(), GtIndicator::Gt0011).unwrap();
+        assert_eq!(decoded, gt);
+    }
+
+    #[test]
+    fn indicator_from_u8_rejects_out_of_range() {
+        assert!(matches!(
+            GtIndicator::from_u8(5),
+            Err(SccpError::InvalidGtIndicator(5))
+        ));
+        assert_eq!(GtIndicator::from_u8(0).unwrap(), GtIndicator::NoGt);
+    }
+
+    #[test]
+    fn decode_truncated_gt_headers() {
+        // Each format needs at least its fixed header bytes before the digits.
+        assert!(matches!(
+            GlobalTitle::decode(&[], GtIndicator::Gt0001),
+            Err(SccpError::TooShort { .. })
+        ));
+        assert!(matches!(
+            GlobalTitle::decode(&[0x00], GtIndicator::Gt0011),
+            Err(SccpError::TooShort { .. })
+        ));
+        assert!(matches!(
+            GlobalTitle::decode(&[0x00, 0x11], GtIndicator::Gt0100),
+            Err(SccpError::TooShort { .. })
+        ));
     }
 }

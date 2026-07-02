@@ -7,17 +7,17 @@ use sccp::*;
 fn udt_with_gt0100_e164() {
     let called_gt = GlobalTitle::Gt0100 {
         translation_type: 0,
-        numbering_plan: 1,  // E.164
-        encoding_scheme: 1, // BCD odd
+        numbering_plan: 1,    // E.164
+        encoding_scheme: 1,   // BCD odd
         nature_of_address: 4, // International
-        digits: "31612345678".to_string(),
+        digits: "15551234567".to_string(),
     };
     let calling_gt = GlobalTitle::Gt0100 {
         translation_type: 0,
         numbering_plan: 1,
         encoding_scheme: 1,
         nature_of_address: 4,
-        digits: "31687654321".to_string(),
+        digits: "15559876543".to_string(),
     };
 
     let called = SccpAddress::with_gt(called_gt, Some(SubsystemNumber::Hlr));
@@ -33,14 +33,14 @@ fn udt_with_gt0100_e164() {
     assert_eq!(decoded.called_party.ssn, Some(SubsystemNumber::Hlr));
     assert_eq!(
         decoded.called_party.global_title.digits().unwrap(),
-        "31612345678"
+        "15551234567"
     );
 
     // Verify calling party
     assert_eq!(decoded.calling_party.ssn, Some(SubsystemNumber::Msc));
     assert_eq!(
         decoded.calling_party.global_title.digits().unwrap(),
-        "31687654321"
+        "15559876543"
     );
 
     // Verify data
@@ -77,7 +77,11 @@ fn gt0001_address() {
     let decoded = SccpAddress::decode(&encoded).unwrap();
 
     match &decoded.global_title {
-        GlobalTitle::Gt0001 { nature_of_address, digits, .. } => {
+        GlobalTitle::Gt0001 {
+            nature_of_address,
+            digits,
+            ..
+        } => {
             assert_eq!(*nature_of_address, 4);
             assert_eq!(digits, "12345");
         }
@@ -97,7 +101,10 @@ fn gt0010_address() {
     let decoded = SccpAddress::decode(&encoded).unwrap();
 
     match &decoded.global_title {
-        GlobalTitle::Gt0010 { translation_type, digits } => {
+        GlobalTitle::Gt0010 {
+            translation_type,
+            digits,
+        } => {
             assert_eq!(*translation_type, 5);
             assert_eq!(digits, "9876543210");
         }
@@ -120,7 +127,12 @@ fn gt0011_address() {
     let decoded = SccpAddress::decode(&encoded).unwrap();
 
     match &decoded.global_title {
-        GlobalTitle::Gt0011 { translation_type, numbering_plan, encoding_scheme, digits } => {
+        GlobalTitle::Gt0011 {
+            translation_type,
+            numbering_plan,
+            encoding_scheme,
+            digits,
+        } => {
             assert_eq!(*translation_type, 0);
             assert_eq!(*numbering_plan, 1);
             assert_eq!(*encoding_scheme, 2);
@@ -193,12 +205,64 @@ fn address_display() {
         numbering_plan: 1,
         encoding_scheme: 1,
         nature_of_address: 4,
-        digits: "31612345678".to_string(),
+        digits: "15551234567".to_string(),
     };
     let addr = SccpAddress::with_gt(gt, Some(SubsystemNumber::Hlr));
     let display = format!("{addr}");
     assert!(display.contains("GT0100"));
-    assert!(display.contains("31612345678"));
+    assert!(display.contains("15551234567"));
     assert!(display.contains("HLR"));
     assert!(display.contains("route=GT"));
+}
+
+/// UDTS (error return) round-trips through the top-level message enum.
+#[test]
+fn udts_via_message_enum() {
+    let called = SccpAddress::with_ssn(SubsystemNumber::Hlr, None);
+    let calling = SccpAddress::with_ssn(SubsystemNumber::Msc, None);
+    let udts = UnitDataService::new(
+        ReturnCause::NoTranslationForAddress,
+        called,
+        calling,
+        vec![0x62, 0x40, 0x01],
+    );
+    let msg = SccpMessage::Udts(udts);
+
+    let encoded = msg.encode().unwrap();
+    let decoded = SccpMessage::decode(&encoded).unwrap();
+    assert_eq!(decoded, msg);
+    match decoded {
+        SccpMessage::Udts(d) => {
+            assert_eq!(d.return_cause, ReturnCause::NoTranslationForAddress);
+            assert_eq!(d.data, vec![0x62, 0x40, 0x01]);
+        }
+        other => panic!("expected UDTS, got {other:?}"),
+    }
+}
+
+/// Every named ReturnCause survives a value round-trip.
+#[test]
+fn return_cause_value_round_trip() {
+    for raw in [0u8, 1, 2, 3, 4, 5, 6, 7, 13, 42] {
+        assert_eq!(ReturnCause::from_u8(raw).value(), raw);
+    }
+}
+
+/// Unknown SSN values fall through to Other and round-trip.
+#[test]
+fn ssn_other_round_trip() {
+    let ssn = SubsystemNumber::from_u8(200);
+    assert_eq!(ssn, SubsystemNumber::Other(200));
+    assert_eq!(ssn.value(), 200);
+}
+
+/// The full message-type table maps back to itself.
+#[test]
+fn message_type_table_round_trip() {
+    for raw in 0x01u8..=0x14 {
+        let mt = MessageType::from_u8(raw).expect("known message type");
+        assert_eq!(mt as u8, raw);
+    }
+    assert!(MessageType::from_u8(0x00).is_none());
+    assert!(MessageType::from_u8(0xFF).is_none());
 }

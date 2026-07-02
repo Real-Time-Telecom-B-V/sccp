@@ -13,13 +13,14 @@
 //! ```
 //! use sccp::{SccpAddress, GlobalTitle, SubsystemNumber, UnitData};
 //!
-//! // Create an address with GT0100 (E.164 number)
+//! // Create an address with GT0100 (E.164 number). Digits are synthetic
+//! // (fictional +1-555 range).
 //! let gt = GlobalTitle::Gt0100 {
 //!     translation_type: 0,
 //!     numbering_plan: 1,  // E.164
 //!     encoding_scheme: 1, // BCD odd
 //!     nature_of_address: 4,
-//!     digits: "31612345678".to_string(),
+//!     digits: "15551234567".to_string(),
 //! };
 //! let called = SccpAddress::with_gt(gt, Some(SubsystemNumber::Hlr));
 //! let calling = SccpAddress::with_ssn(SubsystemNumber::Msc, None);
@@ -27,7 +28,9 @@
 //! let udt = UnitData::new(called, calling, vec![0x62, 0x40]);
 //! let encoded = udt.encode().unwrap();
 //! let decoded = UnitData::decode(&encoded).unwrap();
+//! assert_eq!(decoded, udt);
 //! ```
+#![warn(missing_docs)]
 
 pub mod address;
 pub mod bcd;
@@ -38,6 +41,6 @@ pub mod types;
 
 pub use address::SccpAddress;
 pub use error::SccpError;
-pub use global_title::{GtIndicator, GlobalTitle};
+pub use global_title::{GlobalTitle, GtIndicator};
 pub use message::{SccpMessage, UnitData, UnitDataService};
 pub use types::{MessageType, ReturnCause, SubsystemNumber};

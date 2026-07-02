@@ -1,3 +1,9 @@
+//! Telephony-BCD (TBCD) digit packing, as used for Global Title digits.
+//!
+//! Two digits are packed per byte, low nibble first; an odd digit count is
+//! padded with a `0xF` filler nibble. The `*`, `#`, and `a`–`c` extension
+//! nibbles are supported.
+
 use crate::error::SccpError;
 
 /// Encode a digit string to TBCD (Telephony BCD) format.
@@ -5,7 +11,7 @@ use crate::error::SccpError;
 /// Two digits per byte, low nibble first. If odd number of digits,
 /// the last byte's high nibble is 0x0F (filler).
 ///
-/// Example: "31612345678" → [0x13, 0x16, 0x32, 0x54, 0x76, 0xF8]
+/// Example: "15551234567" → [0x51, 0x55, 0x21, 0x43, 0x65, 0xF7]
 pub fn encode_tbcd(digits: &str) -> Result<Vec<u8>, SccpError> {
     let mut bytes = Vec::with_capacity(digits.len().div_ceil(2));
 
@@ -88,12 +94,10 @@ mod tests {
 
     #[test]
     fn encode_phone_number() {
-        let encoded = encode_tbcd("31612345678").unwrap();
-        // 3→1, 1→6, 1→2, 2→3, 3→4, 4→5, 5→6, 6→7, 7→8, 8→F
-        assert_eq!(
-            encoded,
-            vec![0x13, 0x16, 0x32, 0x54, 0x76, 0xF8]
-        );
+        // "15551234567" (odd length): digits pair low-nibble-first, and the
+        // final unpaired digit gets a 0xF filler in its high nibble.
+        let encoded = encode_tbcd("15551234567").unwrap();
+        assert_eq!(encoded, vec![0x51, 0x55, 0x21, 0x43, 0x65, 0xF7]);
     }
 
     #[test]
@@ -110,17 +114,17 @@ mod tests {
 
     #[test]
     fn round_trip_even() {
-        let original = "31612345678";
-        // This has 11 digits (odd), so let's test an even one
-        let original = "3161234567";
+        // Even digit count → no filler nibble.
+        let original = "1234567890";
         let encoded = encode_tbcd(original).unwrap();
+        assert_eq!(encoded.len(), original.len() / 2);
         let decoded = decode_tbcd(&encoded);
         assert_eq!(decoded, original);
     }
 
     #[test]
     fn round_trip_odd() {
-        let original = "31612345678";
+        let original = "15551234567";
         let encoded = encode_tbcd(original).unwrap();
         let decoded = decode_tbcd(&encoded);
         assert_eq!(decoded, original);
@@ -135,6 +139,25 @@ mod tests {
 
     #[test]
     fn invalid_digit() {
-        assert!(encode_tbcd("123x456").is_err());
+        match encode_tbcd("123x456") {
+            Err(SccpError::InvalidBcdDigit(b'x')) => {}
+            other => panic!("expected InvalidBcdDigit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extension_nibbles_round_trip() {
+        // `*`, `#`, and `a`-`c` are valid TBCD extension nibbles.
+        let original = "12*34#5abc";
+        let encoded = encode_tbcd(original).unwrap();
+        assert_eq!(decode_tbcd(&encoded), original);
+    }
+
+    #[test]
+    fn uppercase_hex_letters_normalise_to_lowercase() {
+        // Uppercase A/B/C encode to the same nibbles as lowercase and decode back
+        // to lowercase.
+        let encoded = encode_tbcd("ABC").unwrap();
+        assert_eq!(decode_tbcd(&encoded), "abc");
     }
 }

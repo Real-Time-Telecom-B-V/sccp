@@ -1,3 +1,5 @@
+//! SCCP enumerations: message types, subsystem numbers, and return causes.
+
 use std::fmt;
 
 /// SCCP Message Types (ITU-T Q.713 Section 4).
@@ -47,6 +49,7 @@ pub enum MessageType {
 }
 
 impl MessageType {
+    /// Map a message-type octet to its [`MessageType`], or `None` if unknown.
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
             0x01 => Some(Self::Cr),
@@ -106,6 +109,7 @@ impl fmt::Display for MessageType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum SubsystemNumber {
+    /// SSN not known or not used.
     Unknown = 0,
     /// SCCP Management
     SccpMgmt = 1,
@@ -131,11 +135,12 @@ pub enum SubsystemNumber {
     Cap = 146,
     /// PCAP
     Pcap = 249,
-    /// Other
+    /// Any other subsystem number not named above.
     Other(u8),
 }
 
 impl SubsystemNumber {
+    /// Map a raw SSN octet to a [`SubsystemNumber`]; unknown values become [`SubsystemNumber::Other`].
     pub fn from_u8(value: u8) -> Self {
         match value {
             0 => Self::Unknown,
@@ -155,6 +160,7 @@ impl SubsystemNumber {
         }
     }
 
+    /// The raw SSN octet for this subsystem number.
     pub fn value(&self) -> u8 {
         match self {
             Self::Unknown => 0,
@@ -196,22 +202,33 @@ impl fmt::Display for SubsystemNumber {
     }
 }
 
-/// Return Cause for UDTS/XUDTS messages.
+/// Return Cause for UDTS/XUDTS messages (ITU-T Q.713 Section 3.12).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReturnCause {
+    /// No translation for an address of such nature.
     NoTranslationForAddress,
+    /// No translation for this specific address.
     NoTranslationForSpecificAddress,
+    /// The destination subsystem is congested.
     SubsystemCongestion,
+    /// The destination subsystem has failed.
     SubsystemFailure,
+    /// The destination subsystem is unequipped.
     Unequipped,
+    /// The underlying MTP transport failed.
     MtpFailure,
+    /// The network is congested.
     NetworkCongestion,
+    /// Message returned for an unqualified reason.
     Unqualified,
+    /// The hop counter reached zero (routing loop protection).
     HopCounterViolation,
+    /// Any other return cause not named above.
     Other(u8),
 }
 
 impl ReturnCause {
+    /// Map a raw return-cause octet to a [`ReturnCause`]; unknown values become [`ReturnCause::Other`].
     pub fn from_u8(value: u8) -> Self {
         match value {
             0 => Self::NoTranslationForAddress,
@@ -227,6 +244,7 @@ impl ReturnCause {
         }
     }
 
+    /// The raw return-cause octet for this cause.
     pub fn value(&self) -> u8 {
         match self {
             Self::NoTranslationForAddress => 0,

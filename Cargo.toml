@@ -1,10 +1,20 @@
 [package]
 name = "sccp"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
-description = "SCCP (Signaling Connection Control Part) codec per ITU-T Q.711-Q.716"
+rust-version = "1.80"
+description = "SCCP (Signaling Connection Control Part) codec per ITU-T Q.711-Q.716 — pure Rust, no I/O"
+authors = ["Real Time Telecom B.V."]
 license = "MIT"
-repository = "https://github.com/killdashnine/sccp"
+readme = "README.md"
+repository = "https://github.com/Real-Time-Telecom-B-V/sccp"
+homepage = "https://github.com/Real-Time-Telecom-B-V/sccp"
+keywords = ["sccp", "ss7", "sigtran", "tcap", "telecom"]
+categories = ["network-programming"]
+exclude = [".github/", "docs/"]
 
 [dependencies]
 thiserror = "2"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }

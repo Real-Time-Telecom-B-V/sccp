@@ -1,7 +1,9 @@
+//! SCCP Called/Calling Party Address ([`SccpAddress`]) encoding and decoding.
+
 use std::fmt;
 
 use crate::error::SccpError;
-use crate::global_title::{GtIndicator, GlobalTitle};
+use crate::global_title::{GlobalTitle, GtIndicator};
 use crate::types::SubsystemNumber;
 
 /// SCCP Address — Called/Calling Party Address.
@@ -112,10 +114,7 @@ impl SccpAddress {
         let ssn_indicator = if self.ssn.is_some() { 1u8 } else { 0 };
         let ri = if self.route_on_ssn { 1u8 } else { 0 };
 
-        let ai = pc_indicator
-            | (ssn_indicator << 1)
-            | ((gti as u8) << 2)
-            | (ri << 6);
+        let ai = pc_indicator | (ssn_indicator << 1) | ((gti as u8) << 2) | (ri << 6);
 
         let mut buf = vec![ai];
 
@@ -166,7 +165,7 @@ mod tests {
             numbering_plan: 1,
             encoding_scheme: 1,
             nature_of_address: 4,
-            digits: "31612345678".to_string(),
+            digits: "15551234567".to_string(),
         };
         let addr = SccpAddress::with_gt(gt, Some(SubsystemNumber::Hlr));
 
@@ -200,13 +199,13 @@ mod tests {
             numbering_plan: 1,
             encoding_scheme: 1,
             nature_of_address: 4,
-            digits: "31612345678".to_string(),
+            digits: "15551234567".to_string(),
         };
         let addr = SccpAddress::with_gt(gt, Some(SubsystemNumber::Hlr));
         let s = format!("{addr}");
         assert!(s.contains("route=GT"));
         assert!(s.contains("HLR"));
-        assert!(s.contains("31612345678"));
+        assert!(s.contains("15551234567"));
     }
 
     #[test]
@@ -215,5 +214,59 @@ mod tests {
         let s = format!("{addr}");
         assert!(s.contains("route=SSN"));
         assert!(s.contains("MSC"));
+    }
+
+    #[test]
+    fn decode_empty_is_too_short() {
+        assert!(matches!(
+            SccpAddress::decode(&[]),
+            Err(SccpError::TooShort { .. })
+        ));
+    }
+
+    #[test]
+    fn decode_pc_indicator_but_truncated() {
+        // AI with the point-code-present bit set, but no point-code bytes follow.
+        let ai = 0x01;
+        assert!(matches!(
+            SccpAddress::decode(&[ai]),
+            Err(SccpError::TooShort { .. })
+        ));
+    }
+
+    #[test]
+    fn decode_ssn_indicator_but_truncated() {
+        // AI with the SSN-present bit set, but no SSN byte follows.
+        let ai = 0x02;
+        assert!(matches!(
+            SccpAddress::decode(&[ai]),
+            Err(SccpError::TooShort { .. })
+        ));
+    }
+
+    #[test]
+    fn decode_invalid_gt_indicator() {
+        // GTI field (bits 2-5) = 5, which is not a valid indicator.
+        let ai = 0x05 << 2;
+        assert!(matches!(
+            SccpAddress::decode(&[ai]),
+            Err(SccpError::InvalidGtIndicator(5))
+        ));
+    }
+
+    #[test]
+    fn address_with_pc_and_ssn_round_trip() {
+        let gt = GlobalTitle::Gt0010 {
+            translation_type: 7,
+            digits: "5550100".to_string(),
+        };
+        let addr = SccpAddress {
+            route_on_ssn: false,
+            point_code: Some(0x1234),
+            ssn: Some(SubsystemNumber::Vlr),
+            global_title: gt,
+        };
+        let decoded = SccpAddress::decode(&addr.encode().unwrap()).unwrap();
+        assert_eq!(decoded, addr);
     }
 }
