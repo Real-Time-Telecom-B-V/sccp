@@ -8,8 +8,10 @@
 An **SCCP (Signaling Connection Control Part) codec** per **ITU-T Q.711-Q.716** —
 the SS7 network-layer protocol that carries TCAP (and thus MAP / CAP) between
 signalling nodes. Pure Rust: encoders and decoders for SCCP addresses, Global
-Titles, and connectionless **Unitdata (UDT)** messages, with **no transport, no
-async, and no I/O** — every consumer can unit-test against it.
+Titles, and connectionless **Unitdata (UDT / UDTS)** messages, with **no
+transport, no async, and no I/O** — every consumer can unit-test against it. It
+ships as **both** a Rust crate (`cargo add sccp`) and a Rust-backed Python wheel
+(`pip install sccp`), built from one source tree and one version.
 
 ```rust
 use sccp::{SccpAddress, GlobalTitle, SubsystemNumber, UnitData};
@@ -32,6 +34,21 @@ let udt = UnitData::new(called, calling, vec![0x62, 0x40]);
 let bytes = udt.encode().unwrap();
 let decoded = UnitData::decode(&bytes).unwrap();
 assert_eq!(decoded.called_party.ssn, Some(SubsystemNumber::Hlr));
+```
+
+```python
+import sccp
+
+gt = sccp.GlobalTitle.gt0100(
+    "15551234567", translation_type=0, numbering_plan=1,
+    encoding_scheme=1, nature_of_address=4,
+)
+called = sccp.Address.with_gt(gt, ssn=sccp.SSN_HLR)
+calling = sccp.Address.with_ssn(sccp.SSN_MSC)
+
+udt = sccp.UnitData(called, calling, bytes([0x62, 0x40]))
+wire = udt.encode()                 # bytes
+msg = sccp.decode(wire)             # -> UnitData | UnitDataService
 ```
 
 ## Coverage
@@ -62,12 +79,41 @@ SCCP is the SS7 network layer beneath TCAP. In the wider stack this codec pairs
 with an MTP3-User transport (native MTP3 over M2PA, or M3UA over SCTP) that
 carries the encoded SCCP bytes; the codec itself stays pure and portable.
 
+## Performance
+
+Single-core, `cargo bench` ([`benches/codec.rs`](benches/codec.rs)); the codec is
+allocation-light (a `Vec` per encoded message; addresses/GT digits on decode).
+Encode + decode of a UDT routed on SSN and a UDT / UDTS carrying a full GT0100
+(E.164) Global Title are all in the tens-of-nanoseconds range.
+
+A counting-allocator [leak check](examples/leak_check.rs)
+(`./scripts/mem_leak_test.sh`) hammers encode/decode of both the SSN and
+Global-Title paths and asserts **live bytes stay flat** (Δ 0 over millions of
+cycles). Both run in CI.
+
+The Python wheel is the same Rust code behind PyO3; per-call overhead is the
+Python↔Rust boundary, not the codec. The module is declared `gil_used = false`,
+so it loads on free-threaded ("no-GIL") CPython 3.13t / 3.14t.
+
+## Install
+
+```bash
+cargo add sccp          # Rust crate (zero pyo3 in the default build)
+pip install sccp        # Rust-backed Python wheel
+```
+
 ## Development
 
 ```bash
-cargo test
+cargo test                              # unit + integration + doctests
+cargo test --features python            # + the PyO3 binding face
 cargo clippy --all-targets -- -D warnings
-cargo deny check
+cargo bench --no-run
+./scripts/mem_leak_test.sh              # live-bytes leak check (PASS/FAIL)
+cargo deny check                        # advisories, licenses, sources
+
+# Python wheel
+maturin develop && pytest python/tests -q
 ```
 
 ## License

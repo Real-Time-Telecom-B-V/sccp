@@ -1,3 +1,11 @@
 /target
-Cargo.lock
 **/*.rs.bk
+
+# Python build / test artifacts
+__pycache__/
+*.so
+*.pyc
+.venv/
+.pytest_cache/
+dist/
+*.egg-info/

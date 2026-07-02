@@ -39,6 +39,9 @@ pub mod global_title;
 pub mod message;
 pub mod types;
 
+#[cfg(feature = "python")]
+pub mod python;
+
 pub use address::SccpAddress;
 pub use error::SccpError;
 pub use global_title::{GlobalTitle, GtIndicator};
