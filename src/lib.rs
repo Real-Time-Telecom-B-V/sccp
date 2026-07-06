@@ -45,5 +45,8 @@ pub mod python;
 pub use address::SccpAddress;
 pub use error::SccpError;
 pub use global_title::{GlobalTitle, GtIndicator};
-pub use message::{SccpMessage, UnitData, UnitDataService};
+pub use message::{
+    ExtendedUnitData, ExtendedUnitDataService, LongUnitData, LongUnitDataService, SccpMessage,
+    UnitData, UnitDataService, DEFAULT_HOP_COUNTER,
+};
 pub use types::{MessageType, ReturnCause, SubsystemNumber};

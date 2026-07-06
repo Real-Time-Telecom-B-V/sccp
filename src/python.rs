@@ -9,10 +9,13 @@
 //!   extension, so a host can expose sccp without a second shared object.
 //!
 //! The Python surface is a faithful mirror of the Rust one: [`PyGlobalTitle`] builds
-//! the five GT formats, [`PyAddress`] wraps `SccpAddress` (GT/SSN routing), and
-//! [`PyUnitData`] / [`PyUnitDataService`] build and parse whole UDT / UDTS messages.
-//! `sccp.decode()` dispatches on the message-type octet. The module is declared
-//! `gil_used = false`, so it loads on free-threaded ("no-GIL") CPython.
+//! the five GT formats, [`PyAddress`] wraps `SccpAddress` (GT/SSN routing), and the
+//! message classes ([`PyUnitData`] / [`PyUnitDataService`] and their extended /
+//! long counterparts [`PyExtendedUnitData`] / [`PyExtendedUnitDataService`] /
+//! [`PyLongUnitData`] / [`PyLongUnitDataService`]) build and parse whole UDT / UDTS /
+//! XUDT / XUDTS / LUDT / LUDTS messages. `sccp.decode()` dispatches on the
+//! message-type octet. The module is declared `gil_used = false`, so it loads on
+//! free-threaded ("no-GIL") CPython.
 
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
@@ -20,8 +23,10 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyModule};
 
 use crate::{
-    GlobalTitle as CoreGlobalTitle, MessageType, ReturnCause as CoreReturnCause, SccpAddress,
+    ExtendedUnitData, ExtendedUnitDataService, GlobalTitle as CoreGlobalTitle, LongUnitData,
+    LongUnitDataService, MessageType, ReturnCause as CoreReturnCause, SccpAddress,
     SccpError as CoreSccpError, SccpMessage, SubsystemNumber, UnitData, UnitDataService,
+    DEFAULT_HOP_COUNTER,
 };
 
 // ── Error mapping ───────────────────────────────────────────────────────────
@@ -369,21 +374,399 @@ impl PyUnitDataService {
     }
 }
 
+// ── ExtendedUnitData (XUDT, type 0x11) ───────────────────────────────────────
+/// An SCCP Extended Unitdata (XUDT) message — connectionless transfer with a
+/// hop counter and an optional parameter part.
+#[pyclass(name = "ExtendedUnitData", module = "sccp._sccp", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyExtendedUnitData {
+    inner: ExtendedUnitData,
+}
+
+#[pymethods]
+impl PyExtendedUnitData {
+    #[new]
+    #[pyo3(signature = (called_party, calling_party, data, *, protocol_class = 0, message_handling = 0, hop_counter = DEFAULT_HOP_COUNTER, optional_part = Vec::new()))]
+    fn new(
+        called_party: PyAddress,
+        calling_party: PyAddress,
+        data: Vec<u8>,
+        protocol_class: u8,
+        message_handling: u8,
+        hop_counter: u8,
+        optional_part: Vec<u8>,
+    ) -> Self {
+        let mut inner = ExtendedUnitData::new(called_party.inner, calling_party.inner, data);
+        inner.protocol_class = protocol_class;
+        inner.message_handling = message_handling;
+        inner.hop_counter = hop_counter;
+        inner.optional_part = optional_part;
+        Self { inner }
+    }
+
+    /// Protocol class (0 or 1 for connectionless).
+    #[getter]
+    fn protocol_class(&self) -> u8 {
+        self.inner.protocol_class
+    }
+
+    /// Message handling (0 = discard on error, 8 = return on error).
+    #[getter]
+    fn message_handling(&self) -> u8 {
+        self.inner.message_handling
+    }
+
+    /// Hop counter, decremented at each GT translation.
+    #[getter]
+    fn hop_counter(&self) -> u8 {
+        self.inner.hop_counter
+    }
+
+    /// Called (destination) party address.
+    #[getter]
+    fn called_party(&self) -> PyAddress {
+        PyAddress {
+            inner: self.inner.called_party.clone(),
+        }
+    }
+
+    /// Calling (source) party address.
+    #[getter]
+    fn calling_party(&self) -> PyAddress {
+        PyAddress {
+            inner: self.inner.calling_party.clone(),
+        }
+    }
+
+    /// The user data as `bytes`.
+    #[getter]
+    fn data<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.inner.data)
+    }
+
+    /// The raw optional parameter part as `bytes` (empty when absent).
+    #[getter]
+    fn optional_part<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.inner.optional_part)
+    }
+
+    /// Encode the complete XUDT message (including the leading type octet).
+    fn encode<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let bytes = self.inner.encode().map_err(sccp_err)?;
+        Ok(PyBytes::new(py, &bytes))
+    }
+
+    fn __repr__(&self) -> String {
+        format!("ExtendedUnitData({})", self.inner)
+    }
+
+    fn __eq__(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+// ── ExtendedUnitDataService (XUDTS, type 0x12) ───────────────────────────────
+/// An SCCP Extended Unitdata Service (XUDTS) message — the error response for an
+/// XUDT, carrying a return cause and a hop counter.
+#[pyclass(
+    name = "ExtendedUnitDataService",
+    module = "sccp._sccp",
+    skip_from_py_object
+)]
+#[derive(Clone)]
+pub struct PyExtendedUnitDataService {
+    inner: ExtendedUnitDataService,
+}
+
+#[pymethods]
+impl PyExtendedUnitDataService {
+    #[new]
+    #[pyo3(signature = (return_cause, called_party, calling_party, data, *, hop_counter = DEFAULT_HOP_COUNTER, optional_part = Vec::new()))]
+    fn new(
+        return_cause: u8,
+        called_party: PyAddress,
+        calling_party: PyAddress,
+        data: Vec<u8>,
+        hop_counter: u8,
+        optional_part: Vec<u8>,
+    ) -> Self {
+        let mut inner = ExtendedUnitDataService::new(
+            CoreReturnCause::from_u8(return_cause),
+            called_party.inner,
+            calling_party.inner,
+            data,
+        );
+        inner.hop_counter = hop_counter;
+        inner.optional_part = optional_part;
+        Self { inner }
+    }
+
+    /// The return cause, as its raw octet.
+    #[getter]
+    fn return_cause(&self) -> u8 {
+        self.inner.return_cause.value()
+    }
+
+    /// Hop counter.
+    #[getter]
+    fn hop_counter(&self) -> u8 {
+        self.inner.hop_counter
+    }
+
+    /// Called (destination) party address, copied from the returned XUDT.
+    #[getter]
+    fn called_party(&self) -> PyAddress {
+        PyAddress {
+            inner: self.inner.called_party.clone(),
+        }
+    }
+
+    /// Calling (source) party address, copied from the returned XUDT.
+    #[getter]
+    fn calling_party(&self) -> PyAddress {
+        PyAddress {
+            inner: self.inner.calling_party.clone(),
+        }
+    }
+
+    /// The returned user data as `bytes`.
+    #[getter]
+    fn data<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.inner.data)
+    }
+
+    /// The raw optional parameter part as `bytes` (empty when absent).
+    #[getter]
+    fn optional_part<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.inner.optional_part)
+    }
+
+    /// Encode the complete XUDTS message (including the leading type octet).
+    fn encode<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let bytes = self.inner.encode().map_err(sccp_err)?;
+        Ok(PyBytes::new(py, &bytes))
+    }
+
+    fn __repr__(&self) -> String {
+        format!("ExtendedUnitDataService({})", self.inner)
+    }
+
+    fn __eq__(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+// ── LongUnitData (LUDT, type 0x13) ───────────────────────────────────────────
+/// An SCCP Long Unitdata (LUDT) message — like XUDT but able to carry user data
+/// past the ~255-octet UDT/XUDT ceiling.
+#[pyclass(name = "LongUnitData", module = "sccp._sccp", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyLongUnitData {
+    inner: LongUnitData,
+}
+
+#[pymethods]
+impl PyLongUnitData {
+    #[new]
+    #[pyo3(signature = (called_party, calling_party, data, *, protocol_class = 0, message_handling = 0, hop_counter = DEFAULT_HOP_COUNTER, optional_part = Vec::new()))]
+    fn new(
+        called_party: PyAddress,
+        calling_party: PyAddress,
+        data: Vec<u8>,
+        protocol_class: u8,
+        message_handling: u8,
+        hop_counter: u8,
+        optional_part: Vec<u8>,
+    ) -> Self {
+        let mut inner = LongUnitData::new(called_party.inner, calling_party.inner, data);
+        inner.protocol_class = protocol_class;
+        inner.message_handling = message_handling;
+        inner.hop_counter = hop_counter;
+        inner.optional_part = optional_part;
+        Self { inner }
+    }
+
+    /// Protocol class (0 or 1 for connectionless).
+    #[getter]
+    fn protocol_class(&self) -> u8 {
+        self.inner.protocol_class
+    }
+
+    /// Message handling (0 = discard on error, 8 = return on error).
+    #[getter]
+    fn message_handling(&self) -> u8 {
+        self.inner.message_handling
+    }
+
+    /// Hop counter, decremented at each GT translation.
+    #[getter]
+    fn hop_counter(&self) -> u8 {
+        self.inner.hop_counter
+    }
+
+    /// Called (destination) party address.
+    #[getter]
+    fn called_party(&self) -> PyAddress {
+        PyAddress {
+            inner: self.inner.called_party.clone(),
+        }
+    }
+
+    /// Calling (source) party address.
+    #[getter]
+    fn calling_party(&self) -> PyAddress {
+        PyAddress {
+            inner: self.inner.calling_party.clone(),
+        }
+    }
+
+    /// The user data as `bytes` (may exceed 255 octets).
+    #[getter]
+    fn data<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.inner.data)
+    }
+
+    /// The raw optional parameter part as `bytes` (empty when absent).
+    #[getter]
+    fn optional_part<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.inner.optional_part)
+    }
+
+    /// Encode the complete LUDT message (including the leading type octet).
+    fn encode<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let bytes = self.inner.encode().map_err(sccp_err)?;
+        Ok(PyBytes::new(py, &bytes))
+    }
+
+    fn __repr__(&self) -> String {
+        format!("LongUnitData({})", self.inner)
+    }
+
+    fn __eq__(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+// ── LongUnitDataService (LUDTS, type 0x14) ───────────────────────────────────
+/// An SCCP Long Unitdata Service (LUDTS) message — the error response for an
+/// LUDT, carrying a return cause and a hop counter.
+#[pyclass(
+    name = "LongUnitDataService",
+    module = "sccp._sccp",
+    skip_from_py_object
+)]
+#[derive(Clone)]
+pub struct PyLongUnitDataService {
+    inner: LongUnitDataService,
+}
+
+#[pymethods]
+impl PyLongUnitDataService {
+    #[new]
+    #[pyo3(signature = (return_cause, called_party, calling_party, data, *, hop_counter = DEFAULT_HOP_COUNTER, optional_part = Vec::new()))]
+    fn new(
+        return_cause: u8,
+        called_party: PyAddress,
+        calling_party: PyAddress,
+        data: Vec<u8>,
+        hop_counter: u8,
+        optional_part: Vec<u8>,
+    ) -> Self {
+        let mut inner = LongUnitDataService::new(
+            CoreReturnCause::from_u8(return_cause),
+            called_party.inner,
+            calling_party.inner,
+            data,
+        );
+        inner.hop_counter = hop_counter;
+        inner.optional_part = optional_part;
+        Self { inner }
+    }
+
+    /// The return cause, as its raw octet.
+    #[getter]
+    fn return_cause(&self) -> u8 {
+        self.inner.return_cause.value()
+    }
+
+    /// Hop counter.
+    #[getter]
+    fn hop_counter(&self) -> u8 {
+        self.inner.hop_counter
+    }
+
+    /// Called (destination) party address, copied from the returned LUDT.
+    #[getter]
+    fn called_party(&self) -> PyAddress {
+        PyAddress {
+            inner: self.inner.called_party.clone(),
+        }
+    }
+
+    /// Calling (source) party address, copied from the returned LUDT.
+    #[getter]
+    fn calling_party(&self) -> PyAddress {
+        PyAddress {
+            inner: self.inner.calling_party.clone(),
+        }
+    }
+
+    /// The returned user data as `bytes`.
+    #[getter]
+    fn data<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.inner.data)
+    }
+
+    /// The raw optional parameter part as `bytes` (empty when absent).
+    #[getter]
+    fn optional_part<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.inner.optional_part)
+    }
+
+    /// Encode the complete LUDTS message (including the leading type octet).
+    fn encode<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let bytes = self.inner.encode().map_err(sccp_err)?;
+        Ok(PyBytes::new(py, &bytes))
+    }
+
+    fn __repr__(&self) -> String {
+        format!("LongUnitDataService({})", self.inner)
+    }
+
+    fn __eq__(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
 // ── decode() ────────────────────────────────────────────────────────────────
-/// Decode a complete connectionless SCCP message, returning a [`UnitData`] (UDT)
-/// or [`UnitDataService`] (UDTS). Any other message type raises `SccpError`.
+/// Decode a complete connectionless SCCP message, returning the matching class:
+/// [`UnitData`] (UDT), [`UnitDataService`] (UDTS), [`ExtendedUnitData`] (XUDT),
+/// [`ExtendedUnitDataService`] (XUDTS), [`LongUnitData`] (LUDT) or
+/// [`LongUnitDataService`] (LUDTS). Any other message type raises `SccpError`.
 #[pyfunction]
 fn decode(py: Python<'_>, data: &[u8]) -> PyResult<Py<PyAny>> {
     let msg = SccpMessage::decode(data).map_err(sccp_err)?;
     match msg {
-        SccpMessage::Udt(udt) => {
-            let obj = Bound::new(py, PyUnitData { inner: udt })?;
-            Ok(obj.into_any().unbind())
+        SccpMessage::Udt(udt) => Ok(Bound::new(py, PyUnitData { inner: udt })?
+            .into_any()
+            .unbind()),
+        SccpMessage::Udts(udts) => Ok(Bound::new(py, PyUnitDataService { inner: udts })?
+            .into_any()
+            .unbind()),
+        SccpMessage::Xudt(xudt) => Ok(Bound::new(py, PyExtendedUnitData { inner: xudt })?
+            .into_any()
+            .unbind()),
+        SccpMessage::Xudts(xudts) => {
+            Ok(Bound::new(py, PyExtendedUnitDataService { inner: xudts })?
+                .into_any()
+                .unbind())
         }
-        SccpMessage::Udts(udts) => {
-            let obj = Bound::new(py, PyUnitDataService { inner: udts })?;
-            Ok(obj.into_any().unbind())
-        }
+        SccpMessage::Ludt(ludt) => Ok(Bound::new(py, PyLongUnitData { inner: ludt })?
+            .into_any()
+            .unbind()),
+        SccpMessage::Ludts(ludts) => Ok(Bound::new(py, PyLongUnitDataService { inner: ludts })?
+            .into_any()
+            .unbind()),
     }
 }
 
@@ -394,6 +777,10 @@ fn add_contents(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyAddress>()?;
     m.add_class::<PyUnitData>()?;
     m.add_class::<PyUnitDataService>()?;
+    m.add_class::<PyExtendedUnitData>()?;
+    m.add_class::<PyExtendedUnitDataService>()?;
+    m.add_class::<PyLongUnitData>()?;
+    m.add_class::<PyLongUnitDataService>()?;
     m.add_function(wrap_pyfunction!(decode, m)?)?;
 
     // Message types (Q.713 §4). Constants mirror the `MessageType` table.
@@ -452,8 +839,32 @@ fn add_contents(m: &Bound<'_, PyModule>) -> PyResult<()> {
         CoreReturnCause::Unqualified.value(),
     )?;
     m.add(
+        "RETURN_CAUSE_ERROR_IN_MESSAGE_TRANSPORT",
+        CoreReturnCause::ErrorInMessageTransport.value(),
+    )?;
+    m.add(
+        "RETURN_CAUSE_ERROR_IN_LOCAL_PROCESSING",
+        CoreReturnCause::ErrorInLocalProcessing.value(),
+    )?;
+    m.add(
+        "RETURN_CAUSE_DESTINATION_CANNOT_PERFORM_REASSEMBLY",
+        CoreReturnCause::DestinationCannotPerformReassembly.value(),
+    )?;
+    m.add(
+        "RETURN_CAUSE_SCCP_FAILURE",
+        CoreReturnCause::SccpFailure.value(),
+    )?;
+    m.add(
         "RETURN_CAUSE_HOP_COUNTER_VIOLATION",
         CoreReturnCause::HopCounterViolation.value(),
+    )?;
+    m.add(
+        "RETURN_CAUSE_SEGMENTATION_NOT_SUPPORTED",
+        CoreReturnCause::SegmentationNotSupported.value(),
+    )?;
+    m.add(
+        "RETURN_CAUSE_SEGMENTATION_FAILURE",
+        CoreReturnCause::SegmentationFailure.value(),
     )?;
     Ok(())
 }
