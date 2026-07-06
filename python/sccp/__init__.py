@@ -3,8 +3,9 @@
 SCCP (Signaling Connection Control Part) is the SS7 network layer that carries
 TCAP (and thus MAP / CAP) between signalling nodes. This package exposes the same
 connectionless codec the Rust crate (``cargo add sccp``) ships — Global Title
-addressing, Subsystem Numbers, and Unitdata (UDT) / Unitdata Service (UDTS)
-messages — from one source tree / one version.
+addressing, Subsystem Numbers, and Unitdata (UDT) / Unitdata Service (UDTS) plus
+the extended and long forms (XUDT / XUDTS / LUDT / LUDTS) with a hop counter —
+from one source tree / one version.
 
 The wire work (Address Indicator pack/unpack, the variable-part pointer
 arithmetic, TBCD digit packing, body copy) runs in Rust; Python just builds and
@@ -22,11 +23,17 @@ from ._sccp import (
     MESSAGE_TYPE_UDTS,
     MESSAGE_TYPE_XUDT,
     MESSAGE_TYPE_XUDTS,
+    RETURN_CAUSE_DESTINATION_CANNOT_PERFORM_REASSEMBLY,
+    RETURN_CAUSE_ERROR_IN_LOCAL_PROCESSING,
+    RETURN_CAUSE_ERROR_IN_MESSAGE_TRANSPORT,
     RETURN_CAUSE_HOP_COUNTER_VIOLATION,
     RETURN_CAUSE_MTP_FAILURE,
     RETURN_CAUSE_NETWORK_CONGESTION,
     RETURN_CAUSE_NO_TRANSLATION_FOR_ADDRESS,
     RETURN_CAUSE_NO_TRANSLATION_FOR_SPECIFIC_ADDRESS,
+    RETURN_CAUSE_SCCP_FAILURE,
+    RETURN_CAUSE_SEGMENTATION_FAILURE,
+    RETURN_CAUSE_SEGMENTATION_NOT_SUPPORTED,
     RETURN_CAUSE_SUBSYSTEM_CONGESTION,
     RETURN_CAUSE_SUBSYSTEM_FAILURE,
     RETURN_CAUSE_UNEQUIPPED,
@@ -44,7 +51,11 @@ from ._sccp import (
     SSN_UNKNOWN,
     SSN_VLR,
     Address,
+    ExtendedUnitData,
+    ExtendedUnitDataService,
     GlobalTitle,
+    LongUnitData,
+    LongUnitDataService,
     SccpError,
     UnitData,
     UnitDataService,
@@ -63,6 +74,10 @@ __all__ = [
     # messages + codec
     "UnitData",
     "UnitDataService",
+    "ExtendedUnitData",
+    "ExtendedUnitDataService",
+    "LongUnitData",
+    "LongUnitDataService",
     "decode",
     "SccpError",
     # message-type constants
@@ -94,6 +109,12 @@ __all__ = [
     "RETURN_CAUSE_MTP_FAILURE",
     "RETURN_CAUSE_NETWORK_CONGESTION",
     "RETURN_CAUSE_UNQUALIFIED",
+    "RETURN_CAUSE_ERROR_IN_MESSAGE_TRANSPORT",
+    "RETURN_CAUSE_ERROR_IN_LOCAL_PROCESSING",
+    "RETURN_CAUSE_DESTINATION_CANNOT_PERFORM_REASSEMBLY",
+    "RETURN_CAUSE_SCCP_FAILURE",
     "RETURN_CAUSE_HOP_COUNTER_VIOLATION",
+    "RETURN_CAUSE_SEGMENTATION_NOT_SUPPORTED",
+    "RETURN_CAUSE_SEGMENTATION_FAILURE",
     "__version__",
 ]

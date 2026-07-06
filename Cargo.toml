@@ -1,6 +1,6 @@
 [package]
 name = "sccp"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.80"
 description = "SCCP (Signaling Connection Control Part) codec per ITU-T Q.711-Q.716 — pure Rust, no I/O"

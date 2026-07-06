@@ -25,6 +25,17 @@ GOLDEN_UDT_SSN = bytes.fromhex("0900030507024206024208026240")
 # 1-byte body.
 GOLDEN_UDTS = bytes.fromhex("0a0303050702420602420801aa")
 
+# XUDT (type 0x11): class 0, hop counter 0x0f, four one-octet pointers, the same
+# SSN addresses and 2-byte body. Dissects clean as XUDT in Wireshark (Q.713).
+GOLDEN_XUDT_SSN = bytes.fromhex("11000f04060800024206024208026240")
+
+# XUDTS (type 0x12): return cause 0x0C (hop counter violation), hop counter 0x0f.
+GOLDEN_XUDTS_HCV = bytes.fromhex("120c0f04060800024206024208026240")
+
+# LUDT (type 0x13): two-octet little-endian pointers 7/8/9/0, a two-octet data
+# length, hop counter 0x0f.
+GOLDEN_LUDT_SSN = bytes.fromhex("13000f070008000900000002420602420802006240")
+
 
 def test_message_type_constants() -> None:
     assert sccp.MESSAGE_TYPE_UDT == 0x09
@@ -49,7 +60,11 @@ def test_return_cause_constants() -> None:
     assert sccp.RETURN_CAUSE_NO_TRANSLATION_FOR_ADDRESS == 0
     assert sccp.RETURN_CAUSE_SUBSYSTEM_FAILURE == 3
     assert sccp.RETURN_CAUSE_UNEQUIPPED == 4
-    assert sccp.RETURN_CAUSE_HOP_COUNTER_VIOLATION == 13
+    # Q.713 §3.12: hop counter violation is 0x0C. 0x0D is "segmentation not
+    # supported".
+    assert sccp.RETURN_CAUSE_HOP_COUNTER_VIOLATION == 12
+    assert sccp.RETURN_CAUSE_SEGMENTATION_NOT_SUPPORTED == 13
+    assert sccp.RETURN_CAUSE_SCCP_FAILURE == 11
 
 
 def test_udt_ssn_matches_golden_vector() -> None:
@@ -161,6 +176,71 @@ def test_decode_rejects_unsupported_type() -> None:
     # CR (0x01) is a valid SCCP type but not decoded by this connectionless codec.
     with pytest.raises(sccp.SccpError):
         sccp.decode(bytes([0x01, 0, 0, 0, 0]))
+
+
+# ── XUDT / XUDTS / LUDT / LUDTS (hop counter) ────────────────────────────────
+def test_xudt_matches_golden_and_round_trips() -> None:
+    called = sccp.Address.with_ssn(sccp.SSN_HLR)
+    calling = sccp.Address.with_ssn(sccp.SSN_MSC)
+    xudt = sccp.ExtendedUnitData(called, calling, bytes([0x62, 0x40]))
+    assert xudt.hop_counter == 15
+    assert xudt.encode() == GOLDEN_XUDT_SSN
+    decoded = sccp.decode(GOLDEN_XUDT_SSN)
+    assert isinstance(decoded, sccp.ExtendedUnitData)
+    assert decoded.hop_counter == 15
+    assert decoded.called_party.ssn == sccp.SSN_HLR
+    assert decoded.data == bytes([0x62, 0x40])
+    assert decoded.encode() == GOLDEN_XUDT_SSN
+
+
+def test_xudt_optional_part_preserved() -> None:
+    called = sccp.Address.with_ssn(sccp.SSN_HLR)
+    calling = sccp.Address.with_ssn(sccp.SSN_MSC)
+    xudt = sccp.ExtendedUnitData(
+        called, calling, bytes([0x62, 0x40]), optional_part=bytes([0x12, 0x01, 0x03, 0x00])
+    )
+    decoded = sccp.decode(xudt.encode())
+    assert decoded.optional_part == bytes([0x12, 0x01, 0x03, 0x00])
+
+
+def test_xudts_hop_counter_violation_golden() -> None:
+    called = sccp.Address.with_ssn(sccp.SSN_HLR)
+    calling = sccp.Address.with_ssn(sccp.SSN_MSC)
+    xudts = sccp.ExtendedUnitDataService(
+        sccp.RETURN_CAUSE_HOP_COUNTER_VIOLATION, called, calling, bytes([0x62, 0x40])
+    )
+    assert xudts.encode() == GOLDEN_XUDTS_HCV
+    decoded = sccp.decode(GOLDEN_XUDTS_HCV)
+    assert isinstance(decoded, sccp.ExtendedUnitDataService)
+    assert decoded.return_cause == sccp.RETURN_CAUSE_HOP_COUNTER_VIOLATION
+    assert decoded.hop_counter == 15
+
+
+def test_ludt_matches_golden_and_carries_large_data() -> None:
+    called = sccp.Address.with_ssn(sccp.SSN_HLR)
+    calling = sccp.Address.with_ssn(sccp.SSN_MSC)
+    ludt = sccp.LongUnitData(called, calling, bytes([0x62, 0x40]))
+    assert ludt.encode() == GOLDEN_LUDT_SSN
+    decoded = sccp.decode(GOLDEN_LUDT_SSN)
+    assert isinstance(decoded, sccp.LongUnitData)
+    assert decoded.hop_counter == 15
+
+    # A 600-octet body exceeds the one-octet UDT/XUDT length; LUDT carries it.
+    big = bytes(0xAB for _ in range(600))
+    ludt_big = sccp.LongUnitData(called, calling, big)
+    assert sccp.decode(ludt_big.encode()).data == big
+
+
+def test_ludts_round_trips() -> None:
+    called = sccp.Address.with_ssn(sccp.SSN_HLR)
+    calling = sccp.Address.with_ssn(sccp.SSN_MSC)
+    ludts = sccp.LongUnitDataService(
+        sccp.RETURN_CAUSE_HOP_COUNTER_VIOLATION, called, calling, bytes([0x01, 0x02])
+    )
+    decoded = sccp.decode(ludts.encode())
+    assert isinstance(decoded, sccp.LongUnitDataService)
+    assert decoded.return_cause == sccp.RETURN_CAUSE_HOP_COUNTER_VIOLATION
+    assert decoded.data == bytes([0x01, 0x02])
 
 
 def test_decode_rejects_truncated() -> None:

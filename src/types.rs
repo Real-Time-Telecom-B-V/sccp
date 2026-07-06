@@ -221,8 +221,20 @@ pub enum ReturnCause {
     NetworkCongestion,
     /// Message returned for an unqualified reason.
     Unqualified,
+    /// Error in message transport (XUDT/LUDT).
+    ErrorInMessageTransport,
+    /// Error in local processing (XUDT/LUDT).
+    ErrorInLocalProcessing,
+    /// Destination cannot perform reassembly (XUDT/LUDT).
+    DestinationCannotPerformReassembly,
+    /// SCCP failure.
+    SccpFailure,
     /// The hop counter reached zero (routing loop protection).
     HopCounterViolation,
+    /// Segmentation not supported.
+    SegmentationNotSupported,
+    /// Segmentation failure.
+    SegmentationFailure,
     /// Any other return cause not named above.
     Other(u8),
 }
@@ -239,7 +251,13 @@ impl ReturnCause {
             5 => Self::MtpFailure,
             6 => Self::NetworkCongestion,
             7 => Self::Unqualified,
-            13 => Self::HopCounterViolation,
+            8 => Self::ErrorInMessageTransport,
+            9 => Self::ErrorInLocalProcessing,
+            10 => Self::DestinationCannotPerformReassembly,
+            11 => Self::SccpFailure,
+            12 => Self::HopCounterViolation,
+            13 => Self::SegmentationNotSupported,
+            14 => Self::SegmentationFailure,
             other => Self::Other(other),
         }
     }
@@ -255,7 +273,13 @@ impl ReturnCause {
             Self::MtpFailure => 5,
             Self::NetworkCongestion => 6,
             Self::Unqualified => 7,
-            Self::HopCounterViolation => 13,
+            Self::ErrorInMessageTransport => 8,
+            Self::ErrorInLocalProcessing => 9,
+            Self::DestinationCannotPerformReassembly => 10,
+            Self::SccpFailure => 11,
+            Self::HopCounterViolation => 12,
+            Self::SegmentationNotSupported => 13,
+            Self::SegmentationFailure => 14,
             Self::Other(v) => *v,
         }
     }
@@ -274,7 +298,15 @@ impl fmt::Display for ReturnCause {
             Self::MtpFailure => write!(f, "MTP failure"),
             Self::NetworkCongestion => write!(f, "Network congestion"),
             Self::Unqualified => write!(f, "Unqualified"),
+            Self::ErrorInMessageTransport => write!(f, "Error in message transport"),
+            Self::ErrorInLocalProcessing => write!(f, "Error in local processing"),
+            Self::DestinationCannotPerformReassembly => {
+                write!(f, "Destination cannot perform reassembly")
+            }
+            Self::SccpFailure => write!(f, "SCCP failure"),
             Self::HopCounterViolation => write!(f, "Hop counter violation"),
+            Self::SegmentationNotSupported => write!(f, "Segmentation not supported"),
+            Self::SegmentationFailure => write!(f, "Segmentation failure"),
             Self::Other(v) => write!(f, "Other({v})"),
         }
     }

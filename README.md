@@ -8,8 +8,9 @@
 An **SCCP (Signaling Connection Control Part) codec** per **ITU-T Q.711-Q.716** —
 the SS7 network-layer protocol that carries TCAP (and thus MAP / CAP) between
 signalling nodes. Pure Rust: encoders and decoders for SCCP addresses, Global
-Titles, and connectionless **Unitdata (UDT / UDTS)** messages, with **no
-transport, no async, and no I/O** — every consumer can unit-test against it. It
+Titles, and the connectionless **Unitdata** messages — **UDT / UDTS** and the
+extended / long forms **XUDT / XUDTS / LUDT / LUDTS** (with a hop counter) — with
+**no transport, no async, and no I/O** — every consumer can unit-test against it. It
 ships as **both** a Rust crate (`cargo add sccp`) and a Rust-backed Python wheel
 (`pip install sccp`), built from one source tree and one version.
 
@@ -53,11 +54,16 @@ msg = sccp.decode(wire)             # -> UnitData | UnitDataService
 
 ## Coverage
 
-- **Messages** — `UnitData` (UDT, type `0x09`): encode + decode, including the
-  variable-part pointer arithmetic. `SccpMessage` dispatches inbound bytes on the
-  message-type octet. `UnitDataService` (UDTS) and its `ReturnCause` are modelled
-  as types; the full `MessageType` table (CR/CC/DT/UDT/XUDT/LUDT/…) is decoded on
-  read.
+- **Messages** — the connectionless types encode + decode, including the
+  variable-part pointer arithmetic: `UnitData` (UDT, `0x09`), `UnitDataService`
+  (UDTS, `0x0A`), and the extended / long forms `ExtendedUnitData` (XUDT, `0x11`),
+  `ExtendedUnitDataService` (XUDTS, `0x12`), `LongUnitData` (LUDT, `0x13`) and
+  `LongUnitDataService` (LUDTS, `0x14`). The extended / long messages carry a
+  **hop counter** (the standard GTT loop breaker) and an opaque optional part;
+  LUDT/LUDTS use two-octet pointers and a two-octet length to carry user data
+  past the ~255-octet UDT/XUDT ceiling. `SccpMessage` dispatches inbound bytes on
+  the message-type octet; the full `MessageType` table (CR/CC/DT/UDT/XUDT/LUDT/…)
+  is recognised. `ReturnCause` covers the Q.713 §3.12 causes.
 - **Addresses** — `SccpAddress` with the Address Indicator (point-code / SSN /
   GT-indicator / routing-indicator bits), optional 2-byte point code, and
   optional `SubsystemNumber`.

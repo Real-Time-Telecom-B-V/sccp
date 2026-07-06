@@ -9,6 +9,9 @@
 //!      copy path).
 //!   2. **gt** — encode + decode a UDT + UDTS carrying full GT0100 Global Titles
 //!      (adds the TBCD digit pack/unpack + `String` build path), over and over.
+//!   3. **ext** — encode + decode XUDT / XUDTS / LUDT / LUDTS (the hop-counter
+//!      messages: the four-pointer extended variable part, the two-octet-pointer
+//!      long variable part, and the opaque optional-part copy).
 //!
 //! Each phase asserts live bytes return to a flat baseline. Exits non-zero on a
 //! leak. Driven by `scripts/mem_leak_test.sh`.
@@ -18,7 +21,10 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use sccp::{GlobalTitle, ReturnCause, SccpAddress, SubsystemNumber, UnitData, UnitDataService};
+use sccp::{
+    ExtendedUnitData, ExtendedUnitDataService, GlobalTitle, LongUnitData, LongUnitDataService,
+    ReturnCause, SccpAddress, SubsystemNumber, UnitData, UnitDataService,
+};
 
 // ── Counting allocator ──────────────────────────────────────────────────────
 static LIVE: AtomicI64 = AtomicI64::new(0);
@@ -103,6 +109,35 @@ fn gt_cycle(iters: usize) {
     }
 }
 
+// ── Phase 3: extended / long (XUDT + XUDTS + LUDT + LUDTS) churn ─────────────
+fn ext_cycle(iters: usize) {
+    let called = SccpAddress::with_ssn(SubsystemNumber::Hlr, None);
+    let calling = SccpAddress::with_ssn(SubsystemNumber::Msc, None);
+
+    let mut xudt = ExtendedUnitData::new(called.clone(), calling.clone(), vec![0x62, 0x40]);
+    xudt.optional_part = vec![0x12, 0x01, 0x03, 0x00]; // exercise the optional-part copy
+    let xudts = ExtendedUnitDataService::new(
+        ReturnCause::HopCounterViolation,
+        called.clone(),
+        calling.clone(),
+        vec![0x62, 0x40],
+    );
+    let ludt = LongUnitData::new(called.clone(), calling.clone(), vec![0xAB; 400]);
+    let ludts = LongUnitDataService::new(
+        ReturnCause::HopCounterViolation,
+        called,
+        calling,
+        vec![0x62, 0x40],
+    );
+
+    for _ in 0..iters {
+        std::hint::black_box(ExtendedUnitData::decode(&xudt.encode().unwrap()).unwrap());
+        std::hint::black_box(ExtendedUnitDataService::decode(&xudts.encode().unwrap()).unwrap());
+        std::hint::black_box(LongUnitData::decode(&ludt.encode().unwrap()).unwrap());
+        std::hint::black_box(LongUnitDataService::decode(&ludts.encode().unwrap()).unwrap());
+    }
+}
+
 fn report(phase: &str, base: i64) -> i64 {
     let growth = live() - base;
     println!("  {phase}: live = {} bytes (Δ {:+})", live(), growth);
@@ -134,6 +169,16 @@ fn main() {
     }
     let gt_growth = live() - gt_base;
 
+    // Phase 3: extended / long messages (hop counter).
+    println!("\n[ext] {CYCLES} x {ITERS} encode+decode round-trips (XUDT + XUDTS + LUDT + LUDTS)");
+    ext_cycle(ITERS); // warm up
+    let ext_base = live();
+    for c in 1..=CYCLES {
+        ext_cycle(ITERS);
+        report(&format!("cycle {c:>2}/{CYCLES}"), ext_base);
+    }
+    let ext_growth = live() - ext_base;
+
     // Verdict.
     println!();
     let mut ok = true;
@@ -145,8 +190,14 @@ fn main() {
         eprintln!("FAIL: GT live bytes grew {gt_growth} (> {BUDGET})");
         ok = false;
     }
+    if ext_growth > BUDGET {
+        eprintln!("FAIL: extended/long live bytes grew {ext_growth} (> {BUDGET})");
+        ok = false;
+    }
     if !ok {
         std::process::exit(1);
     }
-    println!("PASS: UDT Δ {udt_growth} ≤ {BUDGET}; GT Δ {gt_growth} ≤ {BUDGET}");
+    println!(
+        "PASS: UDT Δ {udt_growth} ≤ {BUDGET}; GT Δ {gt_growth} ≤ {BUDGET}; ext Δ {ext_growth} ≤ {BUDGET}"
+    );
 }
