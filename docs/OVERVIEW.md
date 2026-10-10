@@ -50,7 +50,10 @@ byte layout round-trips through `encode` / `decode`.
 `GtIndicator` is the 4-bit field selecting one of five `GlobalTitle` shapes:
 `NoTitle`, `Gt0001` (nature of address + odd/even), `Gt0010` (translation type),
 `Gt0011` (+ numbering plan + encoding scheme), and `Gt0100` (all four fields).
-Digits are TBCD-coded; `GlobalTitle::digits()` returns the decoded string.
+Digits are TBCD-coded; `GlobalTitle::digits()` returns the decoded string. The
+odd/even indication (the bit in `Gt0001`, encoding scheme 1 or 2 in the other
+two) follows the digit count on encode and decides on decode whether the last
+half octet is a digit; the filler after an odd count is `0000` (Q.713 3.4.2.3.1).
 
 ### Types (`types`)
 

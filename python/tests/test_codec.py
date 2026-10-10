@@ -127,7 +127,7 @@ def test_udt_gt0100_round_trip() -> None:
         sccp.GlobalTitle.gt0001("12345", nature_of_address=4, odd_even=True),
         sccp.GlobalTitle.gt0010("5550199", translation_type=9),
         sccp.GlobalTitle.gt0011(
-            "5550142", translation_type=0, numbering_plan=1, encoding_scheme=2
+            "5550142", translation_type=0, numbering_plan=1, encoding_scheme=1
         ),
     ],
 )
