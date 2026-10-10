@@ -5,6 +5,25 @@ All notable changes are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). See
 [VERSIONING.md](VERSIONING.md) for the policy.
 
+## [1.1.1]
+
+### Fixed
+- **A global title says on the wire how many digits it has.** `GlobalTitle::encode`
+  wrote the encoding scheme (GT 0011, 0100) and the odd/even bit (GT 0001) as the
+  caller left them, so a title built with scheme 1 and an even number of digits
+  went out marked "odd" and a receiver dropped its last digit. The indicator is
+  now taken from the digit count: scheme 1 or 2 is written as whichever of the
+  two is true, any other scheme is written as given. Q.713 3.4.2.3.
+- **The filler after an odd number of digits is `0000`**, as Q.713 3.4.2.3.1 has
+  it, for the formats that carry an odd/even indication. It was `1111`.
+- **Decoding honours the indication.** With "odd" the high half of the last octet
+  is the filler and is no longer read as a digit, so an odd title from a peer
+  that writes filler `0000` no longer gains a trailing `0`.
+
+GT 0010 has no odd/even indication and is unchanged: an odd count still goes out
+with a `1111` filler. A decoder older than this release reads a new odd title one
+`0` too long, since it took only `1111` for a filler.
+
 ## [1.1.0]
 
 ### Added
