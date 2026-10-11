@@ -32,6 +32,16 @@ part; `decode` walks the pointers back to the length-prefixed fields and validat
 every offset against the buffer length, returning `SccpError::TooShort` rather than
 panicking on a truncated frame.
 
+A length indicator is one octet and so is a pointer (Q.713 1.4, 2.2), two octets
+each for the long data and the pointers of LUDT / LUDTS (3.20). `encode` returns
+`SccpError::TooLong`, naming the field, when data or an address is longer than
+its length indicator can say, or when the parameters together put a later one
+out of reach of its pointer: 255 octets of data in UDT / UDTS / XUDT / XUDTS
+(3.16), 65 535 in LUDT / LUDTS. It never writes the low octet of a larger value.
+The smaller limits a network sets (the 272-octet signalling information field
+of a narrowband link, 3952 octets of long data) depend on what carries the
+message and are the caller's to respect.
+
 `SccpMessage::decode` reads the leading message-type octet and dispatches — today
 that means UDT; other types decode their `MessageType` and are reported as
 `InvalidMessageType` until modelled. `UnitDataService` (UDTS) and `ReturnCause`

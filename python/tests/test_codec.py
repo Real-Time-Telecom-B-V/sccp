@@ -252,3 +252,45 @@ def test_decode_rejects_truncated_variable_part() -> None:
     # Valid UDT header claiming a called-party pointer past the buffer end.
     with pytest.raises(sccp.SccpError):
         sccp.decode(bytes([0x09, 0x00, 0x7F, 0x03, 0x04]))
+
+
+def test_data_of_255_octets_fits_and_256_is_an_error() -> None:
+    # Q.713 3.16: the data parameter holds at most 255 octets, its length
+    # indicator is one octet. One more must raise, not go out with length 0.
+    called = sccp.Address.with_ssn(sccp.SSN_HLR)
+    calling = sccp.Address.with_ssn(sccp.SSN_MSC)
+    fits = bytes(i % 251 for i in range(255))
+
+    udt = sccp.UnitData(called, calling, fits).encode()
+    assert udt[11] == 0xFF and len(udt) == 12 + 255
+    assert sccp.decode(udt).data == fits
+
+    xudt = sccp.ExtendedUnitData(called, calling, fits).encode()
+    assert xudt[13] == 0xFF and len(xudt) == 14 + 255
+    assert sccp.decode(xudt).data == fits
+
+    too_long = fits + b"\x00"
+    for message in (
+        sccp.UnitData(called, calling, too_long),
+        sccp.UnitDataService(sccp.RETURN_CAUSE_SUBSYSTEM_FAILURE, called, calling, too_long),
+        sccp.ExtendedUnitData(called, calling, too_long),
+        sccp.ExtendedUnitDataService(
+            sccp.RETURN_CAUSE_SUBSYSTEM_FAILURE, called, calling, too_long
+        ),
+    ):
+        with pytest.raises(sccp.SccpError, match="data does not fit"):
+            message.encode()
+
+    # The long form carries it.
+    assert sccp.decode(sccp.LongUnitData(called, calling, too_long).encode()).data == too_long
+
+
+def test_an_address_of_more_than_255_octets_is_an_error() -> None:
+    # 1 (address indicator) + 1 (translation type) + 254 octets of digits.
+    long_gt = sccp.GlobalTitle.gt0010("1" * 508, translation_type=0)
+    called = sccp.Address.with_gt(long_gt)
+    calling = sccp.Address.with_ssn(sccp.SSN_MSC)
+    with pytest.raises(sccp.SccpError, match="called party address does not fit"):
+        sccp.UnitData(called, calling, b"\x62\x40").encode()
+    with pytest.raises(sccp.SccpError, match="called party address does not fit"):
+        sccp.LongUnitData(called, calling, b"\x62\x40").encode()
