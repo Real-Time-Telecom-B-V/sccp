@@ -5,6 +5,30 @@ All notable changes are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). See
 [VERSIONING.md](VERSIONING.md) for the policy.
 
+## [1.2.0]
+
+### Fixed
+- **`encode` refuses what does not fit a length indicator or a pointer.** The
+  data length of UDT, UDTS, XUDT and XUDTS is one octet (Q.713 2.2, 3.16: "less
+  than or equal to 255 octets"). 256 octets of data went out with length `00`,
+  300 with `2C`, and a receiver decoded a shorter, well-formed message without
+  an error. The same held for an address of more than 255 octets, for the
+  one-octet pointers when the addresses (and, with an optional part, the data)
+  add up past 255, and in LUDT / LUDTS for data past 65 535 octets. All of these
+  are now `Err(SccpError::TooLong { .. })`. Messages that fit encode to the same
+  octets as before.
+
+### Added
+- **`SccpError::TooLong { field, value, maximum }`**, returned by `encode` only.
+  `field` names what does not fit (`"data"`, `"long data"`, `"called party
+  address"`, `"calling party address"`, `"pointer to data"`, ...). Code that
+  matches `SccpError` exhaustively needs an arm for it.
+
+Data of more than 255 octets belongs in `LongUnitData`, or in segmented XUDT
+messages, which this codec does not build. Limits below these (the 272-octet
+signalling information field, the 3952 octets of long data in Q.713 3.20) depend
+on the network under SCCP and are not checked.
+
 ## [1.1.1]
 
 ### Fixed

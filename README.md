@@ -61,7 +61,9 @@ msg = sccp.decode(wire)             # -> UnitData | UnitDataService
   `LongUnitDataService` (LUDTS, `0x14`). The extended / long messages carry a
   **hop counter** (the standard GTT loop breaker) and an opaque optional part;
   LUDT/LUDTS use two-octet pointers and a two-octet length to carry user data
-  past the ~255-octet UDT/XUDT ceiling. `SccpMessage` dispatches inbound bytes on
+  past the 255-octet UDT/XUDT ceiling. `encode` returns `SccpError::TooLong`
+  for data, an address or a pointer that does not fit its one-octet (LUDT/LUDTS:
+  two-octet) field, and never truncates. `SccpMessage` dispatches inbound bytes on
   the message-type octet; the full `MessageType` table (CR/CC/DT/UDT/XUDT/LUDT/…)
   is recognised. `ReturnCause` covers the Q.713 §3.12 causes.
 - **Addresses** — `SccpAddress` with the Address Indicator (point-code / SSN /
@@ -111,7 +113,9 @@ pip install sccp        # Rust-backed Python wheel
 ## Development
 
 ```bash
-cargo test                              # unit + integration + doctests
+cargo test                              # unit + integration + doctests; the
+                                        # Wireshark checks run when tshark is installed
+SCCP_REQUIRE_TSHARK=1 cargo test        # fail instead of skipping without tshark
 cargo test --features python            # + the PyO3 binding face
 cargo clippy --all-targets -- -D warnings
 cargo bench --no-run

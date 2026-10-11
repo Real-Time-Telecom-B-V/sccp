@@ -71,8 +71,49 @@ fn length_prefixed_bounds(bytes: &[u8], offset: usize) -> Result<(usize, usize),
     Ok((start, len))
 }
 
+/// Largest value of a one-octet length indicator or pointer.
+const ONE_OCTET_MAX: usize = u8::MAX as usize;
+/// Largest value of a two-octet length indicator or pointer (LUDT / LUDTS).
+const TWO_OCTET_MAX: usize = u16::MAX as usize;
+
+// What a `SccpError::TooLong` names.
+const CALLED: &str = "called party address";
+const CALLING: &str = "calling party address";
+const DATA: &str = "data";
+const LONG_DATA: &str = "long data";
+const POINTER_TO_CALLING: &str = "pointer to calling party address";
+const POINTER_TO_DATA: &str = "pointer to data";
+const POINTER_TO_OPTIONAL: &str = "pointer to optional part";
+
+/// `value` as a one-octet length indicator or pointer, or the error that says
+/// it does not fit. A length or pointer is never cut down to its low octet: the
+/// receiver would read a different, well-formed message.
+fn one_octet(field: &'static str, value: usize) -> Result<u8, SccpError> {
+    u8::try_from(value).map_err(|_| SccpError::TooLong {
+        field,
+        value,
+        maximum: ONE_OCTET_MAX,
+    })
+}
+
+/// `value` as a two-octet length indicator or pointer, least significant octet
+/// first (Q.713 1.4), or the error that says it does not fit.
+fn two_octets(field: &'static str, value: usize) -> Result<[u8; 2], SccpError> {
+    u16::try_from(value)
+        .map(u16::to_le_bytes)
+        .map_err(|_| SccpError::TooLong {
+            field,
+            value,
+            maximum: TWO_OCTET_MAX,
+        })
+}
+
 /// Encode the three-pointer variable part (called / calling / data), returning
 /// the pointer bytes followed by the length-prefixed fields.
+///
+/// Every length indicator and pointer is one octet. A parameter of more than
+/// 255 octets, or parameters that together push a later one out of reach of its
+/// pointer, are a [`SccpError::TooLong`].
 fn encode_variable_part(
     called: &SccpAddress,
     calling: &SccpAddress,
@@ -81,17 +122,24 @@ fn encode_variable_part(
     let called_bytes = called.encode()?;
     let calling_bytes = calling.encode()?;
 
+    let called_length = one_octet(CALLED, called_bytes.len())?;
+    let calling_length = one_octet(CALLING, calling_bytes.len())?;
+    let data_length = one_octet(DATA, data.len())?;
+
     // Pointers are relative to their own position; the three pointer bytes are
     // followed immediately by the called-address length byte.
     let ptr_called: u8 = 3;
-    let ptr_calling: u8 = (2 + 1 + called_bytes.len()) as u8;
-    let ptr_data: u8 = (1 + 1 + called_bytes.len() + 1 + calling_bytes.len()) as u8;
+    let ptr_calling = one_octet(POINTER_TO_CALLING, 2 + 1 + called_bytes.len())?;
+    let ptr_data = one_octet(
+        POINTER_TO_DATA,
+        1 + 1 + called_bytes.len() + 1 + calling_bytes.len(),
+    )?;
 
-    let mut buf = vec![ptr_called, ptr_calling, ptr_data, called_bytes.len() as u8];
+    let mut buf = vec![ptr_called, ptr_calling, ptr_data, called_length];
     buf.extend_from_slice(&called_bytes);
-    buf.push(calling_bytes.len() as u8);
+    buf.push(calling_length);
     buf.extend_from_slice(&calling_bytes);
-    buf.push(data.len() as u8);
+    buf.push(data_length);
     buf.extend_from_slice(data);
     Ok(buf)
 }
@@ -134,6 +182,9 @@ fn decode_extended_variable_part(
 /// calling, data, optional) followed by the length-prefixed mandatory parts and
 /// the raw optional part. The optional pointer is 0 when there is no optional
 /// part. Each pointer is relative to its own octet.
+///
+/// As in [`encode_variable_part`], whatever does not fit its one-octet length
+/// indicator or pointer is a [`SccpError::TooLong`].
 fn encode_extended_variable_part(
     called: &SccpAddress,
     calling: &SccpAddress,
@@ -143,29 +194,39 @@ fn encode_extended_variable_part(
     let called_bytes = called.encode()?;
     let calling_bytes = calling.encode()?;
 
+    let called_length = one_octet(CALLED, called_bytes.len())?;
+    let calling_length = one_octet(CALLING, calling_bytes.len())?;
+    let data_length = one_octet(DATA, data.len())?;
+
     // Four pointer octets precede the called-address length byte, so the called
     // pointer is 4; each subsequent pointer steps past the prior length-prefixed
     // field. The optional pointer is relative to the fourth pointer octet.
-    let ptr_called = 4usize;
-    let ptr_calling = 4 + called_bytes.len();
-    let ptr_data = 4 + called_bytes.len() + calling_bytes.len();
+    let ptr_called: u8 = 4;
+    let ptr_calling = one_octet(POINTER_TO_CALLING, 4 + called_bytes.len())?;
+    let ptr_data = one_octet(
+        POINTER_TO_DATA,
+        4 + called_bytes.len() + calling_bytes.len(),
+    )?;
     let ptr_optional = if optional.is_empty() {
         0
     } else {
-        4 + called_bytes.len() + calling_bytes.len() + data.len()
+        one_octet(
+            POINTER_TO_OPTIONAL,
+            4 + called_bytes.len() + calling_bytes.len() + data.len(),
+        )?
     };
 
     let mut buf = vec![
-        ptr_called as u8,
-        ptr_calling as u8,
-        ptr_data as u8,
-        ptr_optional as u8,
-        called_bytes.len() as u8,
+        ptr_called,
+        ptr_calling,
+        ptr_data,
+        ptr_optional,
+        called_length,
     ];
     buf.extend_from_slice(&called_bytes);
-    buf.push(calling_bytes.len() as u8);
+    buf.push(calling_length);
     buf.extend_from_slice(&calling_bytes);
-    buf.push(data.len() as u8);
+    buf.push(data_length);
     buf.extend_from_slice(data);
     buf.extend_from_slice(optional);
     Ok(buf)
@@ -239,6 +300,11 @@ fn decode_long_variable_part(
 /// (called, calling, long data, optional), a one-octet length indicator on each
 /// address, a two-octet length indicator on the long data, then the raw optional
 /// part. The optional pointer is 0 when there is no optional part.
+///
+/// An address of more than 255 octets, long data of more than 65 535, or a
+/// pointer past 65 535 is a [`SccpError::TooLong`]. Q.713 3.20 allows the long
+/// data 3952 octets; that limit comes from the network under SCCP and is left
+/// to the caller.
 fn encode_long_variable_part(
     called: &SccpAddress,
     calling: &SccpAddress,
@@ -248,33 +314,36 @@ fn encode_long_variable_part(
     let called_bytes = called.encode()?;
     let calling_bytes = calling.encode()?;
 
+    let called_length = one_octet(CALLED, called_bytes.len())?;
+    let calling_length = one_octet(CALLING, calling_bytes.len())?;
+    let data_length = two_octets(LONG_DATA, data.len())?;
+
     // Absolute message offsets of the mandatory length indicators. The pointer
     // block is octets 3..11; the mandatory part starts at 11.
-    let called_li = 11usize;
-    let calling_li = called_li + 1 + called_bytes.len();
+    let calling_li = 11 + 1 + called_bytes.len();
     let data_li = calling_li + 1 + calling_bytes.len();
     let optional_off = data_li + 2 + data.len();
 
     // Pointer value = target offset - (pointer-field offset + 1).
-    let ptr_called = (called_li - 4) as u16;
-    let ptr_calling = (calling_li - 6) as u16;
-    let ptr_data = (data_li - 8) as u16;
+    let ptr_called = 7u16.to_le_bytes();
+    let ptr_calling = two_octets(POINTER_TO_CALLING, calling_li - 6)?;
+    let ptr_data = two_octets(POINTER_TO_DATA, data_li - 8)?;
     let ptr_optional = if optional.is_empty() {
-        0
+        [0, 0]
     } else {
-        (optional_off - 10) as u16
+        two_octets(POINTER_TO_OPTIONAL, optional_off - 10)?
     };
 
     let mut buf = Vec::new();
-    buf.extend_from_slice(&ptr_called.to_le_bytes());
-    buf.extend_from_slice(&ptr_calling.to_le_bytes());
-    buf.extend_from_slice(&ptr_data.to_le_bytes());
-    buf.extend_from_slice(&ptr_optional.to_le_bytes());
-    buf.push(called_bytes.len() as u8);
+    buf.extend_from_slice(&ptr_called);
+    buf.extend_from_slice(&ptr_calling);
+    buf.extend_from_slice(&ptr_data);
+    buf.extend_from_slice(&ptr_optional);
+    buf.push(called_length);
     buf.extend_from_slice(&called_bytes);
-    buf.push(calling_bytes.len() as u8);
+    buf.push(calling_length);
     buf.extend_from_slice(&calling_bytes);
-    buf.extend_from_slice(&(data.len() as u16).to_le_bytes());
+    buf.extend_from_slice(&data_length);
     buf.extend_from_slice(data);
     buf.extend_from_slice(optional);
     Ok(buf)
@@ -349,6 +418,10 @@ impl UnitData {
     }
 
     /// Encode this UDT to bytes, including the leading message-type octet.
+    ///
+    /// [`SccpError::TooLong`] when the message cannot be encoded: data or an address of more than 255 octets,
+    /// or parameters that together put a later one out of reach of its
+    /// one-octet pointer. Nothing is truncated.
     pub fn encode(&self) -> Result<Vec<u8>, SccpError> {
         let mut buf = vec![
             MessageType::Udt as u8,
@@ -449,6 +522,10 @@ impl UnitDataService {
     }
 
     /// Encode this UDTS to bytes, including the leading message-type octet.
+    ///
+    /// [`SccpError::TooLong`] when the message cannot be encoded: data or an address of more than 255 octets,
+    /// or parameters that together put a later one out of reach of its
+    /// one-octet pointer. Nothing is truncated.
     pub fn encode(&self) -> Result<Vec<u8>, SccpError> {
         let mut buf = vec![MessageType::Udts as u8, self.return_cause.value()];
         buf.extend_from_slice(&encode_variable_part(
@@ -558,6 +635,10 @@ impl ExtendedUnitData {
     }
 
     /// Encode this XUDT to bytes, including the leading message-type octet.
+    ///
+    /// [`SccpError::TooLong`] when the message cannot be encoded: data or an address of more than 255 octets,
+    /// or parameters that together put a later one out of reach of its
+    /// one-octet pointer. Nothing is truncated.
     pub fn encode(&self) -> Result<Vec<u8>, SccpError> {
         let mut buf = vec![
             MessageType::Xudt as u8,
@@ -655,6 +736,10 @@ impl ExtendedUnitDataService {
     }
 
     /// Encode this XUDTS to bytes, including the leading message-type octet.
+    ///
+    /// [`SccpError::TooLong`] when the message cannot be encoded: data or an address of more than 255 octets,
+    /// or parameters that together put a later one out of reach of its
+    /// one-octet pointer. Nothing is truncated.
     pub fn encode(&self) -> Result<Vec<u8>, SccpError> {
         let mut buf = vec![
             MessageType::Xudts as u8,
@@ -752,6 +837,9 @@ impl LongUnitData {
     }
 
     /// Encode this LUDT to bytes, including the leading message-type octet.
+    ///
+    /// [`SccpError::TooLong`] when the message cannot be encoded: an address of
+    /// more than 255 octets or data of more than 65 535. Nothing is truncated.
     pub fn encode(&self) -> Result<Vec<u8>, SccpError> {
         let mut buf = vec![
             MessageType::Ludt as u8,
@@ -846,6 +934,9 @@ impl LongUnitDataService {
     }
 
     /// Encode this LUDTS to bytes, including the leading message-type octet.
+    ///
+    /// [`SccpError::TooLong`] when the message cannot be encoded: an address of
+    /// more than 255 octets or data of more than 65 535. Nothing is truncated.
     pub fn encode(&self) -> Result<Vec<u8>, SccpError> {
         let mut buf = vec![
             MessageType::Ludts as u8,
@@ -922,6 +1013,9 @@ impl SccpMessage {
     }
 
     /// Encode this message to bytes, including the leading message-type octet.
+    ///
+    /// [`SccpError::TooLong`] when a parameter or pointer does not fit the field
+    /// the message type gives it; see the `encode` of each type.
     pub fn encode(&self) -> Result<Vec<u8>, SccpError> {
         match self {
             Self::Udt(udt) => udt.encode(),
